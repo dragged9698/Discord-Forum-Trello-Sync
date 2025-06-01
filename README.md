@@ -87,7 +87,7 @@ This will install:
 
 ### 4. Environment Variables
 
-Create a `.env` file in the project root directory with the following variables:
+Rename the `.env.example` file in the project root directory and modify the following variables:
 
 ```env
 # Discord Configuration
@@ -102,7 +102,6 @@ TRELLO_BOARD_ID=your_trello_board_id_here
 TRELLO_LIST_ID=your_trello_list_id_here
 ```
 
-**Important**: Never commit your `.env` file to version control. Add it to your `.gitignore` file.
 
 ## Getting IDs
 
