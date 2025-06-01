@@ -1,5 +1,3 @@
-<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" class="logo" width="120"/>
-
 # Discord-Trello Bot
 
 A Discord bot that automatically syncs forum channel threads with Trello cards, providing seamless integration between Discord discussions and Trello project management.
