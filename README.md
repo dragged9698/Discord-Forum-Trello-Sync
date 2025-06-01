@@ -211,11 +211,6 @@ If you encounter issues:
 3. Ensure all required permissions are granted
 4. Check API rate limits for both Discord and Trello
 
-## License
-
-This project is licensed under the ISC License.
-
-<div style="text-align: center">⁂</div>
 
 [^1]: file.env
 
