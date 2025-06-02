@@ -1,24 +1,30 @@
 class TrelloPoller {
-    constructor(discordBot, trelloHelper, intervalSeconds = 30) {
+    constructor(discordBot, trelloHelper, intervalSeconds = 60) {
         this.discordBot = discordBot;
         this.trelloHelper = trelloHelper;
         this.intervalSeconds = intervalSeconds;
         this.lastCheckTime = new Date();
         this.pollingInterval = null;
         this.isPolling = false;
-        this.processedActions = new Set(); // Track processed action IDs
-        this.maxLookbackHours = 24; // Look back up to 24 hours for missed notifications
-        this.pendingNotifications = []; // Queue for chronologically ordered notifications
+        this.maxLookbackHours = parseInt(process.env.MAX_LOOKBACK_HOURS) || 24;
+        this.consecutiveErrors = 0;
+        this.maxConsecutiveErrors = 5;
+        
+        // Simplified and more reliable tracking
+        this.processedActions = new Set(); // Only track Trello action IDs
+        this.sentNotifications = new Map(); // cardId -> Set of notification content hashes
     }
 
     start() {
         if (this.isPolling) return;
-        
         console.log(`🔄 Starting Trello polling every ${this.intervalSeconds} seconds`);
         this.isPolling = true;
         
-        // On startup, check for missed notifications from the last 24 hours
-        this.lastCheckTime = new Date(Date.now() - (this.maxLookbackHours * 60 * 60 * 1000));
+        // Load existing notifications efficiently
+        this.loadExistingNotifications();
+        
+        // Shorter lookback to prevent spam on startup
+        this.lastCheckTime = new Date(Date.now() - (30 * 60 * 1000)); // Only 30 minutes lookback
         
         this.pollingInterval = setInterval(async () => {
             await this.checkForUpdates();
@@ -37,148 +43,218 @@ class TrelloPoller {
         }
     }
 
+    async loadExistingNotifications() {
+        try {
+            console.log('🔍 Loading existing notifications to prevent duplicates...');
+            
+            // Get all threads that have linked cards
+            const cardThreadPairs = Array.from(this.discordBot.cardThreadMap.entries());
+            let totalNotifications = 0;
+            
+            for (const [cardId, threadId] of cardThreadPairs) {
+                try {
+                    const thread = await this.discordBot.client.channels.fetch(threadId);
+                    if (!thread) continue;
+                    
+                    const notificationCount = await this.scanThreadNotifications(thread, cardId);
+                    totalNotifications += notificationCount;
+                } catch (error) {
+                    console.error(`Error scanning thread ${threadId}:`, error.message);
+                }
+            }
+            
+            console.log(`📊 Loaded ${totalNotifications} existing notifications from ${cardThreadPairs.length} threads`);
+        } catch (error) {
+            console.error('Error loading existing notifications:', error);
+        }
+    }
+
+    async scanThreadNotifications(thread, cardId) {
+        try {
+            // Fetch recent messages (last 100 to be thorough)
+            const messages = await thread.messages.fetch({ limit: 100 });
+            
+            const botMessages = messages.filter(msg =>
+                msg.author.bot &&
+                msg.embeds.length > 0 &&
+                msg.embeds[0].footer?.text === 'Trello'
+            );
+
+            if (!this.sentNotifications.has(cardId)) {
+                this.sentNotifications.set(cardId, new Set());
+            }
+
+            let notificationCount = 0;
+            for (const message of botMessages.values()) {
+                const embed = message.embeds[0];
+                const contentHash = this.createContentHash(embed);
+                
+                this.sentNotifications.get(cardId).add(contentHash);
+                notificationCount++;
+            }
+            
+            return notificationCount;
+        } catch (error) {
+            console.error(`Error scanning notifications for thread ${thread.name}:`, error.message);
+            return 0;
+        }
+    }
+
+    createContentHash(embed) {
+        // Create a simple content-based hash for duplicate detection
+        const content = `${embed.title}:${embed.description}`;
+        return this.simpleHash(content);
+    }
+
+    simpleHash(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return hash.toString();
+    }
+
     async checkForUpdates() {
         try {
             const since = this.lastCheckTime.toISOString();
             const actions = await this.trelloHelper.getBoardActions(process.env.TRELLO_BOARD_ID, since);
             
+            this.consecutiveErrors = 0;
             console.log(`📊 Found ${actions.length} actions since ${since}`);
+
+            // Primary filter: Only use action IDs for duplicate detection
+            const newActions = actions.filter(action => {
+                return !this.processedActions.has(action.id);
+            });
             
-            // Filter out already processed actions
-            const newActions = actions.filter(action => !this.processedActions.has(action.id));
             console.log(`📊 ${newActions.length} new actions to process`);
-            
+
             if (newActions.length === 0) {
                 this.lastCheckTime = new Date();
                 return;
             }
 
-            // Sort ALL actions by timestamp (oldest first) - this is the key fix
             const sortedActions = newActions.sort((a, b) => new Date(a.date) - new Date(b.date));
             
-            // Process each action and collect valid notifications
-            const notifications = [];
             for (const action of sortedActions) {
-                const notification = await this.prepareNotification(action);
-                if (notification) {
-                    notifications.push(notification);
+                const success = await this.processAction(action);
+                if (success) {
+                    this.processedActions.add(action.id);
                 }
+                
+                // Add delay between notifications
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
 
-            // Send notifications in chronological order
-            for (const notification of notifications) {
-                await this.sendNotification(notification);
-                this.processedActions.add(notification.action.id);
-                
-                // Add a small delay between notifications to avoid rate limits
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            // Clean up old processed action IDs (keep only last 1000)
-            if (this.processedActions.size > 1000) {
-                const actionArray = Array.from(this.processedActions);
-                this.processedActions = new Set(actionArray.slice(-1000));
-            }
-            
+            // Cleanup old data
+            this.cleanupOldData();
             this.lastCheckTime = new Date();
+
         } catch (error) {
-            console.error('Error checking for Trello updates:', error);
+            this.handlePollingError(error);
         }
     }
 
-    async prepareNotification(action) {
+    async processAction(action) {
         const cardId = action.data?.card?.id;
-        if (!cardId) return null;
+        if (!cardId) return false;
 
-        // Find the Discord thread associated with this Trello card
         const threadId = this.discordBot.findThreadByCardId(cardId);
         if (!threadId) {
             console.log(`No Discord thread found for Trello card: ${cardId}`);
-            return null;
+            return false;
         }
 
         try {
             const thread = await this.discordBot.client.channels.fetch(threadId);
-            if (!thread) return null;
-
-            // Check if notification was already sent for this action
-            const notificationExists = await this.checkIfNotificationExists(thread, action);
-            if (notificationExists) {
-                console.log(`📢 Notification already exists for action ${action.id}, skipping`);
-                return null; // Don't create notification if it already exists
-            }
+            if (!thread) return false;
 
             const embed = this.formatNotificationEmbed(action);
-            if (embed) {
-                return {
-                    thread: thread,
-                    embed: embed,
-                    action: action,
-                    timestamp: new Date(action.date)
-                };
-            }
-        } catch (error) {
-            console.error(`Error preparing notification for action ${action.id}:`, error);
-        }
+            if (!embed) return false;
 
-        return null;
-    }
-
-    async sendNotification(notification) {
-        try {
-            await notification.thread.send({ embeds: [notification.embed] });
-            console.log(`📢 Sent notification for ${notification.action.type} on card ${notification.action.data?.card?.id} (Action ID: ${notification.action.id}) at ${notification.timestamp.toISOString()}`);
-        } catch (error) {
-            console.error(`Error sending notification for action ${notification.action.id}:`, error);
-        }
-    }
-
-    async checkIfNotificationExists(thread, action) {
-        try {
-            // Get recent messages from the thread (last 50 messages should be enough)
-            const messages = await thread.messages.fetch({ limit: 50 });
-            
-            // Look for bot messages with embeds that match this action
-            const botMessages = messages.filter(msg => 
-                msg.author.bot && 
-                msg.embeds.length > 0 &&
-                msg.embeds[0].footer?.text === 'Trello'
-            );
-
-            // Check if any bot message corresponds to this action
-            for (const message of botMessages.values()) {
-                const embed = message.embeds[0];
-                const messageTimestamp = new Date(message.createdTimestamp);
-                const actionTimestamp = new Date(action.date);
-                
-                // Check if the message was sent within 5 minutes of the action
-                const timeDiff = Math.abs(messageTimestamp - actionTimestamp);
-                const fiveMinutes = 5 * 60 * 1000;
-                
-                if (timeDiff <= fiveMinutes) {
-                    // Check if the embed matches the action type and content
-                    const expectedEmbed = this.formatNotificationEmbed(action);
-                    if (expectedEmbed && 
-                        embed.title === expectedEmbed.title && 
-                        embed.description === expectedEmbed.description) {
-                        return true;
-                    }
+            // Secondary check: Only check for content duplicates if we have existing notifications
+            if (this.sentNotifications.has(cardId)) {
+                const contentHash = this.createContentHash(embed);
+                if (this.sentNotifications.get(cardId).has(contentHash)) {
+                    console.log(`📢 Skipping content duplicate for action ${action.id} on card ${cardId}`);
+                    return false;
                 }
             }
 
-            return false;
+            // Send notification
+            await thread.send({ embeds: [embed] });
+            
+            // Cache this notification content
+            if (!this.sentNotifications.has(cardId)) {
+                this.sentNotifications.set(cardId, new Set());
+            }
+            
+            const contentHash = this.createContentHash(embed);
+            this.sentNotifications.get(cardId).add(contentHash);
+
+            console.log(`📢 Sent notification for ${action.type} on card ${cardId} (Action ID: ${action.id})`);
+            return true;
+
         } catch (error) {
-            console.error('Error checking for existing notifications:', error);
-            return false; // If we can't check, assume notification doesn't exist
+            console.error(`Error processing action ${action.id}:`, error);
+            return false;
+        }
+    }
+
+    cleanupOldData() {
+        // Clean up processed actions (keep last 2000)
+        if (this.processedActions.size > 2000) {
+            const actionArray = Array.from(this.processedActions);
+            this.processedActions = new Set(actionArray.slice(-2000));
+        }
+
+        // Clean up sent notifications cache (keep last 100 cards)
+        if (this.sentNotifications.size > 100) {
+            const cardArray = Array.from(this.sentNotifications.keys());
+            const cardsToKeep = cardArray.slice(-100);
+            const newCache = new Map();
+            
+            cardsToKeep.forEach(cardId => {
+                newCache.set(cardId, this.sentNotifications.get(cardId));
+            });
+            
+            this.sentNotifications = newCache;
+        }
+    }
+
+    handlePollingError(error) {
+        this.consecutiveErrors++;
+        
+        if (error.code === 'ECONNRESET' || error.name === 'AbortError') {
+            console.log(`⚠️ Connection issue during polling (attempt ${this.consecutiveErrors}/${this.maxConsecutiveErrors}): ${error.message}`);
+        } else {
+            console.error(`❌ Error checking for Trello updates (attempt ${this.consecutiveErrors}/${this.maxConsecutiveErrors}):`, error);
+        }
+
+        if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
+            console.log(`⚠️ Too many consecutive errors, temporarily increasing polling interval`);
+            
+            if (this.pollingInterval) {
+                clearInterval(this.pollingInterval);
+            }
+            
+            const tempInterval = this.intervalSeconds * 2;
+            console.log(`🔄 Restarting polling with ${tempInterval} second interval`);
+            
+            this.pollingInterval = setInterval(async () => {
+                await this.checkForUpdates();
+            }, tempInterval * 1000);
+            
+            this.consecutiveErrors = 0;
         }
     }
 
     formatNotificationEmbed(action) {
         const cardName = action.data?.card?.name || 'Unknown Card';
-        const cardUrl = action.data?.card?.shortUrl || '#';
         const timestamp = new Date(action.date).toLocaleString();
-
-        let title, description, color, emoji;
+        let title, description, color;
 
         switch (action.type) {
             case 'addLabelToCard':
@@ -186,7 +262,7 @@ class TrelloPoller {
                 const labelName = action.data?.label?.name || action.data?.label?.color || 'Unknown Label';
                 title = '🏷️ Label Added';
                 description = `Label **${labelName}** was added to the card`;
-                color = 0x61BD4F; // Green
+                color = 0x61BD4F;
                 break;
 
             case 'removeLabelFromCard':
@@ -194,7 +270,7 @@ class TrelloPoller {
                 const removedLabel = action.data?.label?.name || action.data?.label?.color || 'Unknown Label';
                 title = '🏷️ Label Removed';
                 description = `Label **${removedLabel}** was removed from the card`;
-                color = 0xEB5A46; // Red
+                color = 0xEB5A46;
                 break;
 
             case 'addChecklistToCard':
@@ -202,7 +278,7 @@ class TrelloPoller {
                 const checklistName = action.data?.checklist?.name || 'Unknown Checklist';
                 title = '📋 Checklist Added';
                 description = `Checklist **${checklistName}** was added to the card`;
-                color = 0x0079BF; // Blue
+                color = 0x0079BF;
                 break;
 
             case 'updateCheckItemStateOnCard':
@@ -212,21 +288,21 @@ class TrelloPoller {
                 const stateEmoji = action.data?.checkItem?.state === 'complete' ? '✅' : '⬜';
                 title = `${stateEmoji} Checklist Item ${state === 'completed' ? 'Completed' : 'Updated'}`;
                 description = `Checklist item **${checkItem}** was ${state}`;
-                color = action.data?.checkItem?.state === 'complete' ? 0x61BD4F : 0xF2D600; // Green or Yellow
+                color = action.data?.checkItem?.state === 'complete' ? 0x61BD4F : 0xF2D600;
                 break;
 
             case 'addMemberToCard':
                 if (process.env.NOTIFY_MEMBER_CHANGES !== 'true') return null;
                 title = '👤 Member Assigned';
                 description = 'A team member was assigned to this card';
-                color = 0x9F19CC; // Purple
+                color = 0x9F19CC;
                 break;
 
             case 'removeMemberFromCard':
                 if (process.env.NOTIFY_MEMBER_CHANGES !== 'true') return null;
                 title = '👤 Member Unassigned';
                 description = 'A team member was unassigned from this card';
-                color = 0xC377E0; // Light Purple
+                color = 0xC377E0;
                 break;
 
             case 'updateCard':
@@ -235,47 +311,47 @@ class TrelloPoller {
                     if (process.env.NOTIFY_DUE_DATE_CHANGES !== 'true') return null;
                     const oldDue = action.data?.old?.due;
                     const newDue = action.data?.card?.due;
-                    
+
                     if (!oldDue && newDue) {
                         const dueDate = new Date(newDue).toLocaleDateString();
                         title = '📅 Due Date Set';
                         description = `Due date was set to **${dueDate}**`;
-                        color = 0xF2D600; // Yellow
+                        color = 0xF2D600;
                     } else if (oldDue && !newDue) {
                         title = '📅 Due Date Removed';
                         description = 'Due date was removed from the card';
-                        color = 0xEB5A46; // Red
+                        color = 0xEB5A46;
                     } else if (oldDue && newDue && oldDue !== newDue) {
                         const dueDate = new Date(newDue).toLocaleDateString();
                         title = '📅 Due Date Changed';
                         description = `Due date was updated to **${dueDate}**`;
-                        color = 0x0079BF; // Blue
+                        color = 0x0079BF;
                     }
                 }
-
 
                 // Handle name changes
                 if (action.data?.old?.name !== undefined) {
                     const oldName = action.data?.old?.name;
                     title = '✏️ Card Renamed';
                     description = `Card was renamed from **${oldName}**`;
-                    color = 0x0079BF; // Blue
+                    color = 0x0079BF;
                 }
-                break;
 
-            case 'addAttachmentToCard':
-
-                break;
-
-            case 'deleteAttachmentFromCard':
-
+                // Handle list moves
+                if (action.data?.listBefore && action.data?.listAfter) {
+                    const fromList = action.data.listBefore.name;
+                    const toList = action.data.listAfter.name;
+                    title = '🔄 Card Moved';
+                    description = `Card was moved from **${fromList}** to **${toList}**`;
+                    color = 0x9F19CC;
+                }
                 break;
 
             case 'commentCard':
                 if (process.env.NOTIFY_COMMENT_CHANGES !== 'true') return null;
                 title = '💬 New Comment';
                 description = 'A new comment was added to the card';
-                color = 0x0079BF; // Blue
+                color = 0x0079BF;
                 break;
 
             case 'moveCardToBoard':
@@ -283,7 +359,7 @@ class TrelloPoller {
                 const listName = action.data?.list?.name || action.data?.listAfter?.name || 'Unknown List';
                 title = '🔄 Card Moved';
                 description = `Card was moved to **${listName}**`;
-                color = 0x9F19CC; // Purple
+                color = 0x9F19CC;
                 break;
 
             default:
@@ -296,8 +372,7 @@ class TrelloPoller {
             color: color,
             title: title,
             description: description,
-            fields: [
-            ],
+            fields: [],
             footer: {
                 text: 'Trello',
                 icon_url: 'https://cdn.iconscout.com/icon/free/png-256/trello-226529.png'

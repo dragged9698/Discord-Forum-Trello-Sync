@@ -4,7 +4,6 @@ const fetch = require('node-fetch');
 class TrelloHelper extends Trello {
     constructor(key, token) {
         super(key, token);
-        // Store the key and token as instance properties
         this.apiKey = key;
         this.apiToken = token;
         console.log('DEBUG - Key being used:', key);
@@ -15,206 +14,320 @@ class TrelloHelper extends Trello {
     }
 
     _overrideMethods() {
-        // Override card.create method to match your exact working curl command
         const originalCard = this.card;
+        
         originalCard.create = async (cardData) => {
-            try {
+            return this._retryRequest(async () => {
                 console.log('Creating card with manual implementation...');
-                // DEBUG: Log the exact values being sent
                 console.log('DEBUG - Sending key:', this.apiKey);
                 console.log('DEBUG - Sending token:', this.apiToken);
 
-                // Use the exact same format as your working curl command
                 const formData = new URLSearchParams();
                 formData.append('key', this.apiKey);
                 formData.append('token', this.apiToken);
                 formData.append('idList', cardData.idList);
                 formData.append('name', cardData.name);
-
+                
                 if (cardData.desc) {
                     formData.append('desc', cardData.desc);
                 }
-
                 if (cardData.pos) {
                     formData.append('pos', cardData.pos);
                 }
 
                 console.log('DEBUG - Form data:', formData.toString());
 
-                const response = await fetch('https://api.trello.com/1/cards', {
-                    method: 'POST',
-                    body: formData
-                });
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error(`Trello API Error: ${response.status} - ${errorText}`);
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                try {
+                    const response = await fetch('https://api.trello.com/1/cards', {
+                        method: 'POST',
+                        body: formData,
+                        signal: controller.signal,
+                        headers: {
+                            'Connection': 'keep-alive'
+                        }
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error(`Trello API Error: ${response.status} - ${errorText}`);
+                        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('Card created successfully:', result.id);
+                    return result;
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    throw error;
                 }
-
-                const result = await response.json();
-                console.log('Card created successfully:', result.id);
-                return result;
-            } catch (error) {
-                console.error('Card creation failed:', error);
-                throw error;
-            }
+            });
         };
 
-        // Override card.update method
         originalCard.update = async (cardId, updateData) => {
-            try {
+            return this._retryRequest(async () => {
                 const formData = new URLSearchParams();
                 formData.append('key', this.apiKey);
                 formData.append('token', this.apiToken);
-
+                
                 Object.keys(updateData).forEach(key => {
                     formData.append(key, updateData[key]);
                 });
 
-                const response = await fetch(`https://api.trello.com/1/cards/${cardId}`, {
-                    method: 'PUT',
-                    body: formData
-                });
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                try {
+                    const response = await fetch(`https://api.trello.com/1/cards/${cardId}`, {
+                        method: 'PUT',
+                        body: formData,
+                        signal: controller.signal,
+                        headers: {
+                            'Connection': 'keep-alive'
+                        }
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    throw error;
                 }
-
-                return await response.json();
-            } catch (error) {
-                console.error('Card update failed:', error);
-                throw error;
-            }
+            });
         };
 
-        // Override board.searchCards method
         const originalBoard = this.board;
         originalBoard.searchCards = async (boardId) => {
-            try {
+            return this._retryRequest(async () => {
                 const url = `https://api.trello.com/1/boards/${boardId}/cards?key=${this.apiKey}&token=${this.apiToken}`;
-                const response = await fetch(url, {
-                    method: 'GET'
-                });
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                try {
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        signal: controller.signal,
+                        headers: {
+                            'Connection': 'keep-alive'
+                        }
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    throw error;
                 }
-
-                return await response.json();
-            } catch (error) {
-                console.error('Board search failed:', error);
-                return [];
-            }
+            }, []);
         };
     }
 
+    async _retryRequest(requestFn, defaultReturn = null, maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return await requestFn();
+            } catch (error) {
+                const isRetriableError = error.code === 'ECONNRESET' || 
+                                       error.code === 'ETIMEDOUT' || 
+                                       error.name === 'AbortError' ||
+                                       (error.message && error.message.includes('timeout'));
+
+                if (isRetriableError && attempt < maxRetries) {
+                    const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+                    console.log(`⚠️ Attempt ${attempt} failed with ${error.code || error.name}, retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                
+                console.error('Request failed after all retries:', error);
+                if (defaultReturn !== null) {
+                    return defaultReturn;
+                }
+                throw error;
+            }
+        }
+    }
+
     async addAttachment(cardId, attachmentData) {
-        try {
+        return this._retryRequest(async () => {
             const formData = new URLSearchParams();
             formData.append('key', this.apiKey);
             formData.append('token', this.apiToken);
             formData.append('url', attachmentData.url);
             formData.append('name', attachmentData.name);
 
-            const response = await fetch(`https://api.trello.com/1/cards/${cardId}/attachments`, {
-                method: 'POST',
-                body: formData
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            try {
+                const response = await fetch(`https://api.trello.com/1/cards/${cardId}/attachments`, {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal,
+                    headers: {
+                        'Connection': 'keep-alive'
+                    }
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                clearTimeout(timeoutId);
+                throw error;
             }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Trello API request failed:', error);
-            throw error;
-        }
+        });
     }
 
     async searchAttachments(cardId) {
-        try {
-            const response = await fetch(`https://api.trello.com/1/cards/${cardId}/attachments?key=${this.apiKey}&token=${this.apiToken}`);
+        return this._retryRequest(async () => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            try {
+                const response = await fetch(`https://api.trello.com/1/cards/${cardId}/attachments?key=${this.apiKey}&token=${this.apiToken}`, {
+                    signal: controller.signal,
+                    headers: {
+                        'Connection': 'keep-alive'
+                    }
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                clearTimeout(timeoutId);
+                throw error;
             }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Trello API request failed:', error);
-            return [];
-        }
+        }, []);
     }
 
     async addComment(cardId, text) {
-        try {
+        return this._retryRequest(async () => {
             const formData = new URLSearchParams();
             formData.append('key', this.apiKey);
             formData.append('token', this.apiToken);
             formData.append('text', text);
 
-            const response = await fetch(`https://api.trello.com/1/cards/${cardId}/actions/comments`, {
-                method: 'POST',
-                body: formData
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            try {
+                const response = await fetch(`https://api.trello.com/1/cards/${cardId}/actions/comments`, {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal,
+                    headers: {
+                        'Connection': 'keep-alive'
+                    }
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                clearTimeout(timeoutId);
+                throw error;
             }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Trello API request failed:', error);
-            throw error;
-        }
+        });
     }
 
-    // Add polling methods for notifications
     async getBoardActions(boardId, since = null) {
-        try {
+        return this._retryRequest(async () => {
             let url = `https://api.trello.com/1/boards/${boardId}/actions?key=${this.apiKey}&token=${this.apiToken}&limit=50`;
             if (since) {
                 url += `&since=${since}`;
             }
-            
-            const response = await fetch(url);
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            try {
+                const response = await fetch(url, {
+                    signal: controller.signal,
+                    headers: {
+                        'Connection': 'keep-alive'
+                    }
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                clearTimeout(timeoutId);
+                throw error;
             }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('Failed to get board actions:', error);
-            return [];
-        }
+        }, []);
     }
 
     async getCardActions(cardId, since = null) {
-        try {
+        return this._retryRequest(async () => {
             let url = `https://api.trello.com/1/cards/${cardId}/actions?key=${this.apiKey}&token=${this.apiToken}&limit=50`;
             if (since) {
                 url += `&since=${since}`;
             }
-            
-            const response = await fetch(url);
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            try {
+                const response = await fetch(url, {
+                    signal: controller.signal,
+                    headers: {
+                        'Connection': 'keep-alive'
+                    }
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                clearTimeout(timeoutId);
+                throw error;
             }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('Failed to get card actions:', error);
-            return [];
-        }
+        }, []);
     }
 }
 
