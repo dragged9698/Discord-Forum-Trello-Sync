@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  discord-trello-bot:
+    build: .
+    container_name: discord-trello-bot-dev
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./logs:/app/logs
+    networks:
+      - bot-network
+    command: npm run dev
+
+networks:
+  bot-network:
+    driver: bridge
