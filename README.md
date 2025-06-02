@@ -27,9 +27,8 @@ Before setting up the bot, ensure you have:
 
 ### 🐳 Option 1: Docker Deployment (Recommended)
 
-#### Quick Start with Docker Compose
-
 **Step 1: Get the Project**
+
 Clone or download the project files to your local machine.
 
 **Step 2: Configure Environment Variables**
@@ -80,8 +79,6 @@ Stop the bot: `docker-compose down`
 ---
 
 ### 💻 Option 2: Source Code Deployment
-
-#### Installation Steps
 
 **Step 1: Get the Project**
 Download or clone the project to your local machine.
