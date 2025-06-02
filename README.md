@@ -1,231 +1,301 @@
-<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" class="logo" width="120"/>
-
 # Discord-Trello Bot
 
 A Discord bot that automatically syncs forum channel threads with Trello cards, providing seamless integration between Discord discussions and Trello project management.
 
-## Features
+## ✨ Features
 
-- **Automatic Thread Sync**: Creates Trello cards for new Discord forum threads
-- **Real-time Updates**: Updates Trello cards when thread messages are added or modified
-- **Attachment Support**: Syncs Discord attachments, embeds, and shared links to Trello cards
-- **Duplicate Prevention**: Intelligent handling to avoid duplicate cards and attachments
-- **Rich Formatting**: Preserves Discord markdown formatting in Trello card descriptions
-- **Thread Mapping**: Maintains persistent mapping between Discord threads and Trello cards
+- **🔄 Automatic Thread Sync** - Creates Trello cards for new Discord forum threads
+- **⚡ Real-time Updates** - Updates Trello cards when thread messages are added or modified
+- **📎 Attachment Support** - Syncs Discord attachments, embeds, and shared links to Trello cards
+- **🛡️ Duplicate Prevention** - Intelligent handling to avoid duplicate cards and attachments
+- **🎨 Rich Formatting** - Preserves Discord markdown formatting in Trello card descriptions
+- **🗺️ Thread Mapping** - Maintains persistent mapping between Discord threads and Trello cards
+- **🔔 Polling Support** - Real-time monitoring of Trello changes with Discord notifications
 
-
-## Prerequisites
+## 📋 Prerequisites
 
 Before setting up the bot, ensure you have:
 
-- **Node.js** (version 18 or higher)
-- **npm** (comes with Node.js)
+- **Node.js** (version 18 or higher) OR **Docker**
 - A **Discord Application** and Bot Token
 - A **Trello Account** with API access
 - A **Discord Server** with a forum channel
 
+---
 
-## Installation
+## 🚀 Installation & Deployment
 
-### 1. Clone or Download the Project
+### 🐳 Option 1: Docker Deployment (Recommended)
 
-Download all the project files to your local machine:
+**Step 1: Get the Project**
 
-- `index.js`
-- `trello-helper.js`
-- `package.json`
-- `package-lock.json`
+Clone or download the project files to your local machine.
 
+**Step 2: Configure Environment Variables**
 
-### 2. Install Dependencies
+Copy `env.example` to `.env` and fill in your configuration:
 
-Navigate to the project directory and install the required packages:
+> **Discord Configuration**
+> - `DISCORD_TOKEN` - Your Discord bot token
+> - `GUILD_ID` - Your Discord server ID
+> - `FORUM_CHANNEL_ID` - Your forum channel ID
+>
+> **Trello Configuration**
+> - `TRELLO_KEY` - Your Trello API key
+> - `TRELLO_TOKEN` - Your Trello token
+> - `TRELLO_BOARD_ID` - Your Trello board ID
+> - `TRELLO_LIST_ID` - Your Trello list ID
+>
+> **Optional Polling Settings**
+> - `ENABLE_TRELLO_POLLING=true`
+> - `POLLING_INTERVAL_SECONDS=60`
+> - `NOTIFY_LABEL_CHANGES=true`
+> - `NOTIFY_CHECKLIST_CHANGES=true`
+> - `NOTIFY_MEMBER_CHANGES=true`
+> - `NOTIFY_DUE_DATE_CHANGES=true`
+> - `NOTIFY_ATTACHMENT_CHANGES=true`
+> - `NOTIFY_COMMENT_CHANGES=true`
+> - `NOTIFICATION_EMOJI=🔔`
+> - `MAX_LOOKBACK_HOURS=24`
 
+**Step 3: Launch the Bot**
+
+For production:
 ```bash
-npm install
+docker-compose up -d
 ```
 
-This will install:
-
-- `discord.js` - Discord API library
-- `dotenv` - Environment variable management
-- `trello-node-api` - Trello API integration
-- `node-fetch` - HTTP requests
-- `form-data` - Form data handling
-
-
-## Configuration
-
-### 1. Discord Bot Setup
-
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create a new application or select an existing one
-3. Navigate to the "Bot" section
-4. Create a bot and copy the **Bot Token**
-5. Under "Privileged Gateway Intents", enable:
-    - Message Content Intent
-    - Server Members Intent (optional)
-
-### 2. Discord Server Setup
-
-1. Create or identify a **Forum Channel** in your Discord server
-2. Note the **Guild ID** (Server ID) and **Forum Channel ID**
-3. Invite the bot to your server with the following permissions:
-    - Read Messages
-    - Send Messages
-    - Read Message History
-    - Use Slash Commands
-    - Manage Threads
-
-### 3. Trello Setup
-
-1. Go to [Trello Developer API Keys](https://trello.com/app-key)
-2. Copy your **API Key**
-3. Generate a **Token** by clicking the Token link
-4. Create or identify the Trello board and list where cards will be created
-5. Get the **Board ID** and **List ID**:
-    - Board ID: Found in the URL when viewing your board
-    - List ID: Use Trello API or browser developer tools to find the list ID
-
-### 4. Environment Variables
-
-Create a `.env` file in the project root directory with the following variables:
-
-```env
-# Discord Configuration
-DISCORD_TOKEN=your_discord_bot_token_here
-GUILD_ID=your_discord_server_id_here
-FORUM_CHANNEL_ID=your_forum_channel_id_here
-
-# Trello Configuration
-TRELLO_KEY=your_trello_api_key_here
-TRELLO_TOKEN=your_trello_token_here
-TRELLO_BOARD_ID=your_trello_board_id_here
-TRELLO_LIST_ID=your_trello_list_id_here
+For development (with hot reload):
+```bash
+docker-compose -f docker-compose.dev.yml up -d
 ```
 
-**Important**: Never commit your `.env` file to version control. Add it to your `.gitignore` file.
+**Step 4: Monitor & Manage**
 
-## Getting IDs
+View logs: `docker-compose logs -f discord-trello-bot`
 
-### Discord IDs
+Stop the bot: `docker-compose down`
 
-1. Enable Developer Mode in Discord (User Settings → Advanced → Developer Mode)
-2. Right-click on your server → "Copy Server ID" (Guild ID)
-3. Right-click on your forum channel → "Copy Channel ID" (Forum Channel ID)
+---
 
-### Trello IDs
+### 💻 Option 2: Source Code Deployment
 
-**Board ID**:
+**Step 1: Get the Project**
+Download or clone the project to your local machine.
 
-- Open your Trello board in a browser
-- The Board ID is in the URL: `https://trello.com/b/BOARD_ID/board-name`
+**Step 2: Install Dependencies**
+Run `npm install` to install all required packages including:
+- discord.js (Discord API library)
+- dotenv (Environment variable management)
+- trello-node-api (Trello API integration)
+- node-fetch (HTTP requests)
+- form-data (Form data handling)
 
-**List ID**:
+**Step 3: Configure Environment**
+Copy `file.env.example` to `.env` and configure with the same values as the Docker method above.
 
-- Open browser developer tools (F12)
-- Go to Network tab
-- Refresh the Trello board page
-- Look for API calls to find the list ID, or use this API endpoint:
+**Step 4: Run the Bot**
 
-```
-https://api.trello.com/1/boards/YOUR_BOARD_ID/lists?key=YOUR_KEY&token=YOUR_TOKEN
-```
-
-
-## Running the Bot
-
-### Development Mode
-
+**Simple Start:**
 ```bash
 npm start
 ```
 
-
-### Production Mode
-
-For production deployment, consider using a process manager like PM2:
-
+**Production with PM2:**
 ```bash
+# Install PM2 globally
 npm install -g pm2
+
+# Start the bot
 pm2 start index.js --name "discord-trello-bot"
+
+# Save configuration
 pm2 save
+
+# Setup auto-start on boot
 pm2 startup
 ```
 
+**PM2 Management:**
+- View logs: `pm2 logs discord-trello-bot`
+- Restart: `pm2 restart discord-trello-bot`
+- Stop: `pm2 stop discord-trello-bot`
+- Remove: `pm2 delete discord-trello-bot`
 
-## How It Works
+---
 
-1. **Thread Creation**: When a new thread is created in the specified forum channel, the bot automatically creates a corresponding Trello card
-2. **Message Sync**: All messages in the thread are formatted and added to the Trello card description
-3. **Attachment Handling**: Discord attachments, embeds, and shared links are added as Trello card attachments
-4. **Real-time Updates**: When new messages are posted or existing messages are edited, the Trello card is updated accordingly
-5. **Duplicate Prevention**: The bot maintains a mapping to prevent duplicate cards and attachments
+## ⚙️ Configuration Guide
 
-## Trello Card Format
+### 🤖 Discord Bot Setup
 
-Each Trello card includes:
+1. Visit the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application or select an existing one
+3. Navigate to the **Bot** section
+4. Create a bot and copy the **Bot Token**
+5. Enable these **Privileged Gateway Intents**:
+   - Message Content Intent
+   - Server Members Intent (optional)
 
-- **Title**: `[Discord] Thread Name - by Username`
-- **Description**: Formatted thread content with participant information
-- **Attachments**: All Discord attachments, images, and shared links
-- **Position**: New cards are added to the top of the specified list
+### 🏠 Discord Server Setup
 
+1. Create or identify a **Forum Channel** in your Discord server
+2. Note the **Guild ID** (Server ID) and **Forum Channel ID**
+3. Invite the bot with these permissions:
+   - Read Messages
+   - Send Messages
+   - Read Message History
+   - Use Slash Commands
+   - Manage Threads
 
-## Troubleshooting
+### 📋 Trello Setup
+
+1. Go to [Trello Developer API Keys](https://trello.com/app-key)
+2. Copy your **API Key**
+3. Generate a **Token** by clicking the Token link
+4. Create or identify your Trello board and list
+5. Get the **Board ID** and **List ID**
+
+---
+
+## 🔍 Getting Required IDs
+
+### Discord IDs
+
+**Enable Developer Mode:** User Settings → Advanced → Developer Mode
+
+- **Guild ID:** Right-click your server → "Copy Server ID"
+- **Forum Channel ID:** Right-click your forum channel → "Copy Channel ID"
+
+### Trello IDs
+
+**Board ID:** Found in your Trello board URL
+`https://trello.com/b/BOARD_ID/board-name`
+
+**List ID:** Use this API endpoint:
+`https://api.trello.com/1/boards/YOUR_BOARD_ID/lists?key=YOUR_KEY&token=YOUR_TOKEN`
+
+---
+
+## 🔄 How It Works
+
+The bot creates a seamless bridge between Discord and Trello:
+
+1. **Thread Creation** → Automatically creates corresponding Trello card
+2. **Message Sync** → Formats and adds all thread messages to card description
+3. **Attachment Handling** → Syncs Discord attachments, embeds, and links to Trello
+4. **Real-time Updates** → Updates cards when messages are posted or edited
+5. **Trello Polling** → Monitors Trello changes and sends Discord notifications
+6. **Duplicate Prevention** → Maintains mapping to avoid duplicates
+
+### 📝 Trello Card Format
+
+Each card includes:
+- **Title:** `[Discord] Thread Name - by Username`
+- **Description:** Formatted thread content with participant info
+- **Attachments:** All Discord attachments, images, and shared links
+- **Position:** New cards added to top of specified list
+
+---
+
+## 🐳 Docker Management
+
+### Useful Commands
+
+**Container Management:**
+- View running containers: `docker ps`
+- View all containers: `docker ps -a`
+- View logs: `docker logs discord-trello-bot`
+- Access container shell: `docker exec -it discord-trello-bot /bin/sh`
+
+**Cleanup:**
+- Remove container: `docker rm discord-trello-bot`
+- Remove image: `docker rmi discord-trello-bot`
+- Rebuild and restart: `docker-compose up -d --build`
+
+### Volume Configuration
+
+The Docker setup includes persistent log storage:
+- `./logs:/app/logs` - Application logs stored on host system
+
+---
+
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-**Bot not responding**:
+**🚫 Bot Not Responding**
+- Verify all environment variables are set correctly
+- Check bot permissions in Discord server
+- Ensure forum channel ID is correct
 
-- Verify all environment variables are correctly set
-- Check that the bot has proper permissions in the Discord server
-- Ensure the forum channel ID is correct
-
-**Trello cards not creating**:
-
+**📋 Trello Cards Not Creating**
 - Verify Trello API credentials
-- Check that the Board ID and List ID are correct
-- Ensure the Trello token has write permissions
+- Check Board ID and List ID accuracy
+- Ensure Trello token has write permissions
 
-**Missing attachments**:
+**🐳 Docker Issues**
+- Confirm Docker is running
+- Verify `.env` file exists with correct values
+- Check container logs: `docker-compose logs -f`
 
-- Check Discord attachment URLs are accessible
-- Verify Trello API limits haven't been exceeded
+**📎 Missing Attachments**
+- Verify Discord attachment URLs are accessible
+- Check Trello API rate limits
 
+### Debug Information
 
-### Debug Mode
+**Docker Deployments:**
+```bash
+docker-compose logs -f discord-trello-bot
+```
 
-The bot includes extensive logging. Check the console output for detailed information about:
+**Source Deployments:**
+```bash
+npm start
+# or
+pm2 logs discord-trello-bot
+```
 
-- Bot initialization
-- Thread processing
-- Trello API calls
-- Error messages
+---
 
+## 📊 Environment Variables Reference
 
-## Support
+| Variable | Description | Default | Required |
+|----------|-------------|---------|:--------:|
+| `DISCORD_TOKEN` | Discord bot token | - | ✅ |
+| `GUILD_ID` | Discord server ID | - | ✅ |
+| `FORUM_CHANNEL_ID` | Discord forum channel ID | - | ✅ |
+| `TRELLO_KEY` | Trello API key | - | ✅ |
+| `TRELLO_TOKEN` | Trello API token | - | ✅ |
+| `TRELLO_BOARD_ID` | Trello board ID | - | ✅ |
+| `TRELLO_LIST_ID` | Trello list ID | - | ✅ |
+| `ENABLE_TRELLO_POLLING` | Enable Trello change monitoring | `true` | ❌ |
+| `POLLING_INTERVAL_SECONDS` | Polling frequency in seconds | `60` | ❌ |
+| `NOTIFY_LABEL_CHANGES` | Notify on label changes | `true` | ❌ |
+| `NOTIFY_CHECKLIST_CHANGES` | Notify on checklist changes | `true` | ❌ |
+| `NOTIFY_MEMBER_CHANGES` | Notify on member changes | `true` | ❌ |
+| `NOTIFY_DUE_DATE_CHANGES` | Notify on due date changes | `true` | ❌ |
+| `NOTIFY_ATTACHMENT_CHANGES` | Notify on attachment changes | `true` | ❌ |
+| `NOTIFY_COMMENT_CHANGES` | Notify on comment changes | `true` | ❌ |
+| `NOTIFICATION_EMOJI` | Emoji for notifications | `🔔` | ❌ |
+| `MAX_LOOKBACK_HOURS` | Hours to look back for missed notifications | `24` | ❌ |
+
+---
+
+## 🆘 Support
 
 If you encounter issues:
 
-1. Check the console logs for error messages
-2. Verify all configuration values are correct
-3. Ensure all required permissions are granted
-4. Check API rate limits for both Discord and Trello
+1. **Check logs** for detailed error messages
+2. **Verify configuration** values are correct
+3. **Ensure permissions** are properly granted
+4. **Monitor API limits** for Discord and Trello
 
-## License
+---
+
+## 📄 License
 
 This project is licensed under the ISC License.
 
-<div style="text-align: center">⁂</div>
-
-[^1]: file.env
-
-[^2]: index.js
-
-[^3]: package.json
-
-[^4]: package-lock.json
-
-[^5]: trello-helper.js
-
+---
+Answer from Perplexity: pplx.ai/share
